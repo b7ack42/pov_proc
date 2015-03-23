@@ -4,6 +4,8 @@
 #include <vector>
 #include <utility>
 #include <string>
+#include <iomanip>
+#include <sstream>
 #include <iterator>
 #include <set>
 
@@ -14,6 +16,7 @@
 #include <stdlib.h>
 #include <regex.h>
 #include <assert.h>
+#include <stdint.h>
 
 using namespace tinyxml2;
 using namespace std;
@@ -23,38 +26,134 @@ using namespace std;
 XMLDocument doc;
 
 enum StepType
-  {
-    DECLARE,
-    SLEEP,
-    READ,
-    WRITE    
-  };
+{
+  DECLARE,
+  SLEEP,
+  READ,
+  WRITE    
+};
+
+enum TextType
+{
+  VAR,
+  DATA
+};
+
+enum AssignType
+{
+  PCRE,
+  SLICE
+};
 
 typedef struct
 {
-  vector<char*> *value;
-  char* echo;
+  StepType type;
+  void* the_step;
+}MetaStep;
 
-}step_write;
+typedef struct
+{
+  float stime;
+}StepDelay;
+
+typedef struct 
+{
+  char* key;
+  char* value;
+}StepDecl;
+
+typedef struct
+{
+  bool invert;
+  vector <string*> values;
+}Match;
+
+typedef struct
+{
+  AssignType type;
+  char* var;
+  void* expr;
+}Assign;
+
+typedef struct
+{ 
+  int timeout;
+  char* echo;
+  int length;
+  string* delim;
+  Match* match;
+  Assign* assign;
+}StepRead;
+
+typedef struct
+{
+  vector<string*> *value;
+  char* echo;
+}StepWrite;
+
 
 class POV
 {
 
 public:
 
-   string m_filename;
-   string m_name;
-   vector< pair<StepType, void*> > m_steps;
+   const char* m_filename;
+   const char* m_name;
+   vector< MetaStep > m_steps;
    vector<char*> m_variables;
-   string m_xml;
+   const char* m_xml;
    //XMLDocument m_doc;
 
 
 public:
   //POV(): filename(NULL), name(NULL) {};
 
+  void dump_step(const MetaStep* ms)
+  {
+    StepType type = ms->type;
+    switch (type)
+    {
+      case WRITE:
+      {
+        StepWrite* sw = (StepWrite *)ms->the_step;
+      }
+    }
+  }
 
-  char* compile_hex_match(char* text)
+  string string_to_hex(const string& in) 
+  {
+      stringstream ss;
+
+      ss << hex ;//<< setw(2) << setfill('0');
+      for (size_t i = 0; in.length() > i; ++i) {
+          ss << "\\x" << setw(2) << setfill('0') << static_cast<unsigned int>(static_cast<unsigned char>(in[i]));
+      }
+
+      return ss.str(); 
+  }
+
+  string hex_to_string(const string& in) 
+  {
+      string output;
+
+      assert((in.length() % 2) == 0);
+
+      size_t cnt = in.length() / 2;
+
+      for (size_t i = 0; cnt > i; ++i) {
+          uint32_t s = 0;
+          stringstream ss;
+          //cout << hex << in.substr(i * 2, 2) << " | " << endl;
+          ss << hex << in.substr(i * 2, 2);
+          ss >> s;
+
+          output.push_back(static_cast<unsigned char>(s));
+      }
+
+      return output;
+  }
+
+  string* compile_hex_match(char* text)
   {
     //{'\n', ' ', '\r', '\t'};
     string data = string(text);
@@ -69,27 +168,106 @@ public:
           //printf("%c\n", (*it));
       }
     }
-    return strdup(data.c_str());
+    string* ret = new string();
+    *ret = hex_to_string(data);
+    return ret;
   }
 
   //TODO
-  char* compile_pcre(char* text)
+  regex_t* compile_pcre(char* text)
   {
     regex_t* preg;
     //regmatch_t pmatch[1];
     bzero(preg, sizeof(regex_t));
     regcomp(preg, text, REG_EXTENDED);
-    return strdup("pcre");
+    //TODO
+    return preg;
+    //return strdup("pcre");
 
   }
 
-  char* compile_string_match(char* data)
+  string* compile_string_match(char* text)
   {
     //return strdup("hello@compile_string_match()");
-    return data;
+    string data = string(text);
+    int state = 0;
+    const char* const hex_chars = "0123456789abcdef";
+    string* out = new string();
+
+    for(string::iterator it = data.begin(); it!=data.end(); it++)
+    {
+      if(state == 0)
+      {
+        if(*it != '\\')
+        {
+          out->push_back(*it);
+          continue;
+        }
+        state = 1;
+      }
+      else if(state == 1)
+      {
+        switch (*it)
+        {
+          case 'n':
+          {
+            out->push_back('\n');
+            state = 0;
+            break;
+          }
+          case 'r':
+          {
+            out->push_back('\r');
+            state = 0;
+            break;
+          }
+          case 't':
+          {
+            out->push_back('\t');
+            state = 0;
+            break;
+          }
+          case '\\':
+          {
+            out->push_back('\\');
+            state = 0;
+            break;
+          }
+          case 'x':
+          {
+            state  = 2;
+            break;
+          }
+          default:
+          {
+            perror("error char in state 1 @compile_string_match()\n");
+          }
+        }
+      }
+      else if(state == 2)
+      {
+        char c1 = tolower(*it);
+        //string::iterator p = lower_bound(hex_chars.begin(), hex_chars.end(), c1);
+        const char* const p = lower_bound(hex_chars, hex_chars + 16, c1);
+        assert(*p == c1);
+        it++;
+        char c2 = tolower(*it);
+        const char* const q = lower_bound(hex_chars, hex_chars + 16, c2);
+        assert(*q == c2);
+        out->push_back((p - hex_chars) << 4 | (q - hex_chars));
+        state = 0;
+      }
+      else
+      {
+        perror("error state @compile_string_match()\n");
+      }
+    }
+    return out;
+
+    //return data;
   }
 
-  char* compile_string(char* type, char* data)
+  void* compile_string(char* type, char* data)
   {
     printf("(type, data)@compile_string(): %s, %s\n", type, data);
     if(strcmp(type, "pcre") == 0)
@@ -114,9 +292,22 @@ public:
       if(strcmp(*it, ret) == 0)
         return strdup(ret);
     }
-    perror("ret not allowed @get_attribute()\n");
-    
+    perror("ret not allowed @get_attribute()\n");    
   }
+
+
+  void add_variable(char* name)
+  {
+    vector<char*>::iterator it;
+    for(it = m_variables.begin(); it != m_variables.end(); it++)
+    {
+      if(strcmp(*it, name) == 0)
+        break;
+    }
+    if(it == m_variables.end())
+      m_variables.push_back(name);
+  }
+
 
   bool has_variable(const char* var)
   {
@@ -132,12 +323,18 @@ public:
 
   void add_step(StepType type,  void* value)
   {
-    if(type == WRITE)
+    // if(type == WRITE)
+    // {
+    //   cout << "  StepWrite.value@add_step(): " << ((StepWrite*)value)->value->at(0) << endl;
+    //   cout << "  StepWrite.echo@add_step(): " << ((StepWrite*)value)->echo << endl;
+    // }
+    MetaStep ms = 
     {
-      cout << "  step_write.value@add_step(): " << ((step_write*)value)->value->at(0) << endl;
-      cout << "  step_write.echo@add_step(): " << ((step_write*)value)->echo << endl;
-    }
-    m_steps.push_back(make_pair(type, value));
+      .type = type,
+      .the_step = value
+    };
+    m_steps.push_back(ms);
+    //m_steps.push_back(make_pair(type, value));
   }
 
 
@@ -147,20 +344,38 @@ public:
   void parse_decl(const XMLElement* elm)
   {
     cout << "decl: " << elm->Name() << endl;
+    const XMLElement* child = elm->FirstChildElement();
+    assert(strcmp(child->Name(), "var") == 0);
+    char* key = strdup(child->GetText());
+
+    child = child->NextSiblingElement();
+    assert(strcmp(child->Name(), "value") == 0);
+    char* value = strdup(child->GetText());
+
+    StepDecl* sdl = new StepDecl();
+    sdl->key = key;
+    sdl->value = value;
+    add_step(DECLARE, sdl);
   }
 
 
   void parse_read(const XMLElement* elm)
   {
     cout << endl << "read: " << elm->Name() << endl;
+
   }
 
   void parse_delay(const XMLElement* elm)
   {
     cout << "delay: " << elm->Name() << endl;
+    StepDelay* sdy = new StepDelay();
+    float t = 0;
+    elm->QueryFloatText(&t);
+    sdy->stime = t / 1000;
+    add_step(SLEEP, sdy);
   }
  
-  char* parse_data(const XMLElement* elm, vector<const char*> allowed_formats, const char* default_format = NULL)
+  string* parse_data(const XMLElement* elm, vector<const char*> allowed_formats, const char* default_format = NULL)
   {
     if(allowed_formats.empty())
     {
@@ -173,7 +388,7 @@ public:
 
     char* data_format = get_attribute(elm, "format", allowed_formats, default_format);
     cout << "elm->text@parse_data: " << elm->GetText() << endl;
-    return compile_string(data_format, strdup(elm->GetText()));
+    return (string*)compile_string(data_format, strdup(elm->GetText()));
   }
 
 
@@ -182,7 +397,7 @@ public:
     cout << endl << "write: ---" << elm->Name() << endl;
     //cout << -2;
     assert(elm);
-    vector<char*>* values = new vector<char*>();
+    vector<string*>* values = new vector<string*>();
     //cout << -1;
     const XMLElement* child = elm->FirstChildElement();
     //cout << 0;
@@ -198,7 +413,8 @@ public:
       {
         assert(strcmp(tag, "var") == 0);
         assert(has_variable(child->GetText()));
-        values->push_back(strdup(child->GetText()));
+        string* text  = new string(child->GetText());
+        values->push_back(text);
       }
 
       child = child->NextSiblingElement();
@@ -210,32 +426,32 @@ public:
     allowed.push_back("no");
     allowed.push_back("ascii");
 
-    // step_write st = 
+    // StepWrite st = 
     // {
-    //   .value = &values,
+    //   .value = values,
     //   .echo = get_attribute(elm, "echo", allowed, "no")
     // };
 
-    step_write* st = (step_write*)malloc(sizeof(step_write));  
+    StepWrite* sw = (StepWrite*)malloc(sizeof(StepWrite));  
     
-    st->value = values,
-    st->echo = get_attribute(elm, "echo", allowed, "no");
+    sw->value = values,
+    sw->echo = get_attribute(elm, "echo", allowed, "no");
     // cout << 2;
-    cout << ".value@parse_write(): " << st->value->at(0) << endl;
+    //cout << ".value@parse_write(): " << st->value->at(0) << endl;
 
 
-    add_step(WRITE, st);
+    add_step(WRITE, sw);
     //cout << 3;
   }
 
-  void parse(string filename)
+  void parse(const char* filename)
   {
 
-    //m_filename = filename;
+    m_filename = filename;
     //m_xml = raw_data;
 
 
-    doc.LoadFile(filename.c_str());
+    doc.LoadFile(filename);
     XMLPrinter printer;
     doc.Print( &printer);
     m_xml = printer.CStr();
@@ -289,18 +505,19 @@ public:
   {
     cout << "dump ------------------------" << endl;
     static const char* StepTypes[] = {"declare", "sleep", "read", "write"};
-    vector< pair<StepType, void*> > ::iterator it;
+    vector< MetaStep > ::iterator it;
     for(it = m_steps.begin(); it != m_steps.end(); it++)
     {
-      if(it->first == WRITE)
+      if(it->type == WRITE)
       {
         cout << "write: "  <<  endl;
-        if(((step_write *)(it->second))->value->empty())
+        if(((StepWrite *)(it->the_step))->value->empty())
           cout << "empty" << endl;
-        cout  << ((step_write*)(it->second))->value->at(0) << endl;
+        cout  << string_to_hex(*(((StepWrite*)(it->the_step))-> value->at(0))) << endl;
+
       }
       else
-        cout << StepTypes[it->first] << endl;
+        cout << StepTypes[it->type] << endl;
 
     }
 
@@ -323,7 +540,7 @@ int main()
   POV pov = POV();
   // pov.compile_hex_match(str);
   // printf("str: %s\n", str.c_str());
-  pov.parse("/home/b7ack/hack/pov_proc/pov-1.xml");
+  pov.parse("/home/b7ack/hack/pov_proc/pov.xml");
   pov.dump();
   
   return 0;
