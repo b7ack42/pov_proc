@@ -33,15 +33,16 @@ enum StepType
   WRITE    
 };
 
-enum TextType
+enum ValueType
 {
   VAR,
-  DATA
+  DATA,
+  vPCRE
 };
 
 enum AssignType
 {
-  PCRE,
+  aPCRE,
   SLICE
 };
 
@@ -64,8 +65,9 @@ typedef struct
 
 typedef struct
 {
-  bool invert;
-  vector <string*> values;
+  bool invert; 
+  vector<ValueType>* types;
+  vector<void*>* values;
 }Match;
 
 typedef struct
@@ -87,6 +89,7 @@ typedef struct
 
 typedef struct
 {
+  vector<ValueType> *type;
   vector<string*> *value;
   char* echo;
 }StepWrite;
@@ -153,7 +156,7 @@ public:
       return output;
   }
 
-  string* compile_hex_match(char* text)
+  string* compile_hex_match(const char* text)
   {
     //{'\n', ' ', '\r', '\t'};
     string data = string(text);
@@ -174,7 +177,7 @@ public:
   }
 
   //TODO
-  regex_t* compile_pcre(char* text)
+  regex_t* compile_pcre(const char* text)
   {
     regex_t* preg;
     //regmatch_t pmatch[1];
@@ -186,7 +189,7 @@ public:
 
   }
 
-  string* compile_string_match(char* text)
+  string* compile_string_match(const char* text)
   {
     //return strdup("hello@compile_string_match()");
     string data = string(text);
@@ -267,7 +270,7 @@ public:
     //return data;
   }
 
-  void* compile_string(char* type, char* data)
+  void* compile_string(const char* type, const char* data)
   {
     printf("(type, data)@compile_string(): %s, %s\n", type, data);
     if(strcmp(type, "pcre") == 0)
@@ -355,15 +358,11 @@ public:
     StepDecl* sdl = new StepDecl();
     sdl->key = key;
     sdl->value = value;
+    m_variables.push_back(key);
     add_step(DECLARE, sdl);
   }
 
 
-  void parse_read(const XMLElement* elm)
-  {
-    cout << endl << "read: " << elm->Name() << endl;
-
-  }
 
   void parse_delay(const XMLElement* elm)
   {
@@ -374,22 +373,135 @@ public:
     sdy->stime = t / 1000;
     add_step(SLEEP, sdy);
   }
- 
-  string* parse_data(const XMLElement* elm, vector<const char*> allowed_formats, const char* default_format = NULL)
+
+  Assign* parse_assign(const XMLElement* elm)
   {
-    if(allowed_formats.empty())
+    //TODO
+
+  }
+
+  string* parse_data(const XMLElement* elm, vector<const char*>* allowed_formats = NULL, const char* default_format = NULL)
+  {
+    if(!allowed_formats)
     {
-      allowed_formats.push_back("asciic");
-      allowed_formats.push_back("hex");
+      allowed_formats = new vector<const char*>();
+      allowed_formats->push_back("asciic");
+      allowed_formats->push_back("hex");
     }
 
     if(!default_format)
         default_format = "asciic";
 
-    char* data_format = get_attribute(elm, "format", allowed_formats, default_format);
+    char* data_format = get_attribute(elm, "format", *allowed_formats, default_format);
     cout << "elm->text@parse_data: " << elm->GetText() << endl;
-    return (string*)compile_string(data_format, strdup(elm->GetText()));
+    return (string*)compile_string(data_format, elm->GetText());
   }
+  
+
+  void parse_read(const XMLElement* elm)
+  {
+    cout << endl << "read: " << elm->Name() << endl;
+    StepRead* sr = new StepRead();
+    add_step(READ, sr);
+
+    vector<const char*> allowed;
+    allowed.push_back("yes");
+    allowed.push_back("no");
+    allowed.push_back("ascii");
+    sr->echo = get_attribute(elm, "echo", allowed, "no");
+    sr->timeout = 0;
+    sr->match = NULL;
+    sr->assign = NULL;
+    sr->length = -1;
+    sr->delim = NULL;
+
+    const XMLElement* child = elm->FirstChildElement();
+    if(strcmp(child->Name(), "length") == 0)
+    {
+      int len;
+      child->QueryIntText(&len);
+      sr->length = len;
+    }
+    else if(strcmp(child->Name(), "delim") == 0)
+    {
+      sr->delim = parse_data(child);
+    }
+    else
+    {
+      perror("invalid first argument @parse_read()\n");
+    }
+
+    child = child->NextSiblingElement();
+    if(!child)
+      return;
+
+    if(strcmp(child->Name(), "match") == 0)
+    {
+      allowed.clear();
+      allowed.push_back("false");
+      allowed.push_back("true");
+      bool invert = (strcmp(get_attribute(child, "invert", allowed, "false"), "true") == 0);
+      
+      const XMLElement* gchild = child->FirstChildElement();
+      assert(gchild);
+      vector<void*>* values = new vector<void*>();
+      vector<ValueType>* types = new vector<ValueType>();
+      const char* tag = gchild->Name();
+      if(strcmp(tag, "data") == 0)
+      {
+        types->push_back(DATA);
+        values->push_back(parse_data(gchild));
+      }
+      else if(strcmp(tag, "pcre") == 0)
+      {
+        types->push_back(vPCRE);
+        values->push_back(compile_string("pcre", gchild->GetText()));
+      }
+      else if(strcmp(tag, "var") == 0)
+      {
+        types->push_back(VAR);
+        string* text = new string(gchild->GetText());
+        values->push_back(text);
+      }
+      else
+      {
+        printf("invalid data.match element name: %s ", tag);
+        perror("@parse_read()");
+      }
+
+      Match* match = new Match();
+      match->invert = invert;
+      match->types = types;
+      match->values = values;
+      sr->match = match;
+
+      child = child->NextSiblingElement();
+      if(!child)
+        return;
+    }
+
+    if(strcmp(child->Name(), "assign") == 0)
+    {
+      Assign* asn = parse_assign(child);
+      sr->assign = asn;
+
+      child = child->NextSiblingElement();
+      if(!child)
+        return;
+    }
+
+    assert(strcmp(child->Name(), "timeout") == 0);
+    //TODO
+
+
+
+
+
+  }
+
+
+ 
+
 
 
   void parse_write(const XMLElement* elm)
@@ -398,6 +510,7 @@ public:
     //cout << -2;
     assert(elm);
     vector<string*>* values = new vector<string*>();
+    vector<ValueType>* types = new vector<ValueType>();
     //cout << -1;
     const XMLElement* child = elm->FirstChildElement();
     //cout << 0;
@@ -406,8 +519,9 @@ public:
       const char* tag = child->Name();
       if(strcmp(tag, "data") ==0)
       {
-        vector<const char*> formats;
-        values->push_back(parse_data(child, formats));
+        //vector<const char*> formats;
+        values->push_back(parse_data(child));
+        types->push_back(DATA);
       }
       else
       {
@@ -415,6 +529,7 @@ public:
         assert(has_variable(child->GetText()));
         string* text  = new string(child->GetText());
         values->push_back(text);
+        types->push_back(VAR);
       }
 
       child = child->NextSiblingElement();
@@ -433,7 +548,7 @@ public:
     // };
 
     StepWrite* sw = (StepWrite*)malloc(sizeof(StepWrite));  
-    
+    sw->type = types;
     sw->value = values,
     sw->echo = get_attribute(elm, "echo", allowed, "no");
     // cout << 2;
