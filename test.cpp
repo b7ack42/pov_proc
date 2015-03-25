@@ -188,5 +188,10 @@ int main()
 	test7('a');
 	test7('b');
 	test8();
+	int i = (int)NULL;
+	if(!i )
+		printf("NULL\n");
+	// else
+	// 	printf("%d", i);
 
 }

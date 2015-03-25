@@ -78,6 +78,12 @@ typedef struct
 }Assign;
 
 typedef struct
+{
+  int begin;
+  int end;
+}Slice;
+
+typedef struct
 { 
   int timeout;
   char* echo;
@@ -189,6 +195,29 @@ public:
 
   }
 
+  Slice* compile_slice(const XMLElement* elm)
+  {
+    assert(strcmp(elm->Name(), "slice") ==0);
+    assert(!elm->GetText());
+    int begin = atoi(get_attribute(elm, "begin", "0")); 
+    char* end_c; 
+    get_attribute(elm, "end");
+    int end;
+    if(end_c)
+    {
+      end = atoi(end_c);
+    }
+    else
+    {
+      end = (int)NULL;
+    }
+    Slice* slice = new Slice();
+    slice->begin = begin;
+    slice->end = end;
+    
+    return slice;
+  }
+
   string* compile_string_match(const char* text)
   {
     //return strdup("hello@compile_string_match()");
@@ -283,19 +312,28 @@ public:
       perror("wrong type @compile_string()\n");
   }
 
-  char* get_attribute(const XMLElement* elm, const char* name, vector<const char*> allowed_ret, const char* default_ret = NULL)
+  char* get_attribute(const XMLElement* elm, const char* name, const char* default_ret = NULL, vector<const char*>* allowed_ret = NULL)
   {
     const char* ret = elm->Attribute(name);
     if(!ret)
       ret = default_ret;
- 
-    vector<const char*>::const_iterator it;
-    for(it = allowed_ret.begin(); it != allowed_ret.end(); it++)
+    if(!ret)
+      return NULL;
+    
+    if(allowed_ret)
     {
-      if(strcmp(*it, ret) == 0)
-        return strdup(ret);
+      vector<const char*>::const_iterator it;
+      for(it = allowed_ret->begin(); it != allowed_ret->end(); it++)
+      {
+        if(strcmp(*it, ret) == 0)
+          return strdup(ret);
+      }
+      perror("ret not allowed @get_attribute()\n");
     }
-    perror("ret not allowed @get_attribute()\n");    
+    else
+    {
+      return strdup(ret);  
+    }
   }
 
 
@@ -377,43 +415,78 @@ public:
   Assign* parse_assign(const XMLElement* elm)
   {
     //TODO
+    Assign* asn = new Assign();
+    assert(strcmp(elm->Name(), "assign") == 0);
+    const XMLElement* child  = elm->FirstChildElement();
+    assert(strcmp(child->Name(), "var") == 0);
+    asn->var = strdup(child->GetText());
+
+    cout << 1.0 << endl;
+
+    child = child->NextSiblingElement();
+    if(strcmp(child->Name(), "pcre") == 0)
+    {
+
+      asn->type = aPCRE;
+    }
+    else if(strcmp(child->Name(), "slice") == 0)
+    {
+      Slice* slice = compile_slice(child);
+      asn->type = SLICE;
+      asn->expr = slice;
+    }
+    else
+    {
+      printf("unknown expr tag %s ", child->Name());
+      perror("@parse_assign()\n");
+    }
+    return asn;
 
   }
 
   string* parse_data(const XMLElement* elm, vector<const char*>* allowed_formats = NULL, const char* default_format = NULL)
   {
+    int mark = 0;
     if(!allowed_formats)
     {
       allowed_formats = new vector<const char*>();
       allowed_formats->push_back("asciic");
       allowed_formats->push_back("hex");
+      mark = 1;
     }
 
     if(!default_format)
         default_format = "asciic";
 
-    char* data_format = get_attribute(elm, "format", *allowed_formats, default_format);
+    char* data_format = get_attribute(elm, "format", default_format, allowed_formats);
     cout << "elm->text@parse_data: " << elm->GetText() << endl;
+    if(mark == 1)
+    {
+      delete(allowed_formats);
+    }
     return (string*)compile_string(data_format, elm->GetText());
   }
-  
+
 
   void parse_read(const XMLElement* elm)
   {
     cout << endl << "read: " << elm->Name() << endl;
+    cout << -2 << endl;
     StepRead* sr = new StepRead();
+    cout << -1 << endl;
     add_step(READ, sr);
-
-    vector<const char*> allowed;
-    allowed.push_back("yes");
-    allowed.push_back("no");
-    allowed.push_back("ascii");
-    sr->echo = get_attribute(elm, "echo", allowed, "no");
+    cout << 0 << endl;
+    vector<const char*>* allowed = new vector<const char*>();
+    allowed->push_back("yes");
+    allowed->push_back("no");
+    allowed->push_back("ascii");
+    sr->echo = get_attribute(elm, "echo", "no", allowed);
     sr->timeout = 0;
     sr->match = NULL;
     sr->assign = NULL;
     sr->length = -1;
     sr->delim = NULL;
+    cout << 1 << endl;
 
     const XMLElement* child = elm->FirstChildElement();
     if(strcmp(child->Name(), "length") == 0)
@@ -435,12 +508,14 @@ public:
     if(!child)
       return;
 
+    cout << 2 << endl;
+
     if(strcmp(child->Name(), "match") == 0)
     {
-      allowed.clear();
-      allowed.push_back("false");
-      allowed.push_back("true");
-      bool invert = (strcmp(get_attribute(child, "invert", allowed, "false"), "true") == 0);
+      allowed->clear();
+      allowed->push_back("false");
+      allowed->push_back("true");
+      bool invert = (strcmp(get_attribute(child, "invert", "false", allowed), "true") == 0);
       
       const XMLElement* gchild = child->FirstChildElement();
       assert(gchild);
@@ -477,29 +552,33 @@ public:
 
       child = child->NextSiblingElement();
       if(!child)
+      {
+        delete(allowed);
         return;
+      }
     }
+    delete(allowed);
+
+    cout << 3 << endl;
 
     if(strcmp(child->Name(), "assign") == 0)
     {
       Assign* asn = parse_assign(child);
       sr->assign = asn;
-
+      cout << 4 << endl;
       child = child->NextSiblingElement();
       if(!child)
         return;
     }
 
+    
     assert(strcmp(child->Name(), "timeout") == 0);
     //TODO
-
-
-
-
-
+    int _t = 0;
+    child->QueryIntText(&_t);
+    sr->timeout = _t;
+    cout << 6 << endl;
   }
-
-
  
 
 
@@ -536,11 +615,6 @@ public:
       
     }
     //cout << 1;
-    vector<const char*> allowed;
-    allowed.push_back("yes");
-    allowed.push_back("no");
-    allowed.push_back("ascii");
-
     // StepWrite st = 
     // {
     //   .value = values,
@@ -549,8 +623,14 @@ public:
 
     StepWrite* sw = (StepWrite*)malloc(sizeof(StepWrite));  
     sw->type = types;
-    sw->value = values,
-    sw->echo = get_attribute(elm, "echo", allowed, "no");
+    sw->value = values;
+
+    vector<const char*>* allowed = new vector<const char*>();;
+    allowed->push_back("yes");
+    allowed->push_back("no");
+    allowed->push_back("ascii");
+    sw->echo = get_attribute(elm, "echo", "no", allowed);
+    delete(allowed);
     // cout << 2;
     //cout << ".value@parse_write(): " << st->value->at(0) << endl;
 
@@ -646,7 +726,7 @@ public:
 
 int main()
 {
-  XMLDocument doc;
+  //XMLDocument doc;
 
   // printf("hello world\n");
   // string str("abc ef\t\r\n123");
