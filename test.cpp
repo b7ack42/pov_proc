@@ -112,7 +112,7 @@ void test1()
 void test2()
 {
 	string str_h = "48656C6C6F20576F726C64";
-	string str_a = hex_to_string2(str_h);
+	string str_a = hex_to_string(str_h);
 	cout << str_a << endl;
 	cout << dec << "len: " << str_a.length() << endl;
 }
@@ -127,10 +127,10 @@ void test3()
 
 void test4()
 {
-	string i = "123";
+	string i = "123456";
 	string* j = new string();
 	*j = i;
-	i = "456";
+	//i = "456";
 	cout << "i, j  " << i << ", " << *j << endl;
 }
 
@@ -176,6 +176,11 @@ void test8()
 	cout << (i++) << endl;
 }
 
+void test9()
+{
+	string str = string("123\x00\x6c\x65", 6);
+	cout << str.length() << endl << hex << str;
+}
 
 int main()
 {
@@ -185,12 +190,8 @@ int main()
 	// int* i = test6(3);
 	// test6(4);
 	// cout << *i << endl;
-	test7('a');
-	test7('b');
-	test8();
-	int i = (int)NULL;
-	if(!i )
-		printf("NULL\n");
+	test2();
+	test9();
 	// else
 	// 	printf("%d", i);
 

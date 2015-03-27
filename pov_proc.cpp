@@ -57,11 +57,27 @@ typedef struct
   float stime;
 }StepDelay;
 
+void dump_delay(StepDelay* sdy)
+{
+  printf("(SLEEP, { %f })\n", sdy->stime);
+}
+
 typedef struct 
 {
   char* key;
   char* value;
 }StepDecl;
+
+void dump_decl(StepDecl* sdl)
+{
+  printf("(DECL, {%s : %s})\n", sdl->key, sdl->value);
+}
+
+typedef struct
+{
+  int group;
+  char* pattern;
+}Regex;
 
 typedef struct
 {
@@ -93,12 +109,32 @@ typedef struct
   Assign* assign;
 }StepRead;
 
+void dump_read(StepRead* sr)
+{
+  //printf("(READ, {'timeout': %d, 'echo': %s, 'length': %d, 'delim': %s, 'match': ")
+  cout << "READ" << endl;
+}
+
 typedef struct
 {
   vector<ValueType> *type;
   vector<string*> *value;
   char* echo;
 }StepWrite;
+
+void dump_write(StepWrite* sw)
+{
+  cout << "(WRITE, ";
+  cout << "{\'echo\': " <<  sw->echo << ", ";
+  cout << "\'values: ['";
+  int i;
+  int cnt  = sw->type->size();
+  // for(i = 0; i < cnt - 1; i++)
+  // {
+  //   cout << "(" << ((ValueStep)(sw->type[i] == VAR) ? "\'var\', " : "\'data\', ") << string_to_hex(sw->value[i]) << "), ";
+  // }
+  // cout << "(" << ((ValueStep)(sw->type[i] == VAR) ? "\'var\', " : "\'data\', ") << string_to_hex(sw->value[i]) << ")]} << endl";
+}
 
 
 class POV
@@ -115,19 +151,8 @@ public:
 
 
 public:
-  //POV(): filename(NULL), name(NULL) {};
-
-  void dump_step(const MetaStep* ms)
-  {
-    StepType type = ms->type;
-    switch (type)
-    {
-      case WRITE:
-      {
-        StepWrite* sw = (StepWrite *)ms->the_step;
-      }
-    }
-  }
+  
+  
 
   string string_to_hex(const string& in) 
   {
@@ -183,16 +208,19 @@ public:
   }
 
   //TODO
-  regex_t* compile_pcre(const char* text)
+  Regex* compile_pcre(const char* text)
   {
-    regex_t* preg;
-    //regmatch_t pmatch[1];
-    bzero(preg, sizeof(regex_t));
-    regcomp(preg, text, REG_EXTENDED);
-    //TODO
-    return preg;
+    // regex_t* preg;
+    // //regmatch_t pmatch[1];
+    // bzero(preg, sizeof(regex_t));
+    // regcomp(preg, text, REG_EXTENDED);
+    // //TODO
+    // return preg;
     //return strdup("pcre");
-
+    Regex* re = new Regex();
+    re->group = 0;
+    re->pattern = strdup(text);
+    return re;
   }
 
   Slice* compile_slice(const XMLElement* elm)
@@ -352,7 +380,7 @@ public:
 
   bool has_variable(const char* var)
   {
-    return true;
+    //return true;
     vector<char*>::iterator it;
     for(it = m_variables.begin(); it != m_variables.end(); it++)
     {
@@ -396,7 +424,8 @@ public:
     StepDecl* sdl = new StepDecl();
     sdl->key = key;
     sdl->value = value;
-    m_variables.push_back(key);
+
+    add_variable(key);
     add_step(DECLARE, sdl);
   }
 
@@ -419,14 +448,18 @@ public:
     assert(strcmp(elm->Name(), "assign") == 0);
     const XMLElement* child  = elm->FirstChildElement();
     assert(strcmp(child->Name(), "var") == 0);
-    asn->var = strdup(child->GetText());
 
-    cout << 1.0 << endl;
+    char* var = strdup(child->GetText());
+    add_variable(var);
+    asn->var = var;
+
 
     child = child->NextSiblingElement();
     if(strcmp(child->Name(), "pcre") == 0)
     {
-
+      Regex* re = compile_pcre(child->GetText());
+      re->group = atoi(get_attribute(child, "group", "0"));
+      asn->expr = re;
       asn->type = aPCRE;
     }
     else if(strcmp(child->Name(), "slice") == 0)
@@ -441,7 +474,6 @@ public:
       perror("@parse_assign()\n");
     }
     return asn;
-
   }
 
   string* parse_data(const XMLElement* elm, vector<const char*>* allowed_formats = NULL, const char* default_format = NULL)
@@ -696,24 +728,52 @@ public:
 
   }
 
+  void dump_step(MetaStep ms)
+  {
+    StepType type = ms.type;
+
+    switch (type)
+    {
+      case WRITE:
+      {
+        dump_write((StepWrite*) ms.the_step);
+        break;
+      }
+      case READ:
+      {
+        dump_read((StepRead*) ms.the_step);
+        break;
+      }
+      case DECLARE:
+      {
+        dump_decl((StepDecl*) ms.the_step);
+        break;
+      }
+      case SLEEP:
+      {
+        dump_delay((StepDelay*) ms.the_step);
+        break;
+      }
+    }
+  }
+
+
   void dump()
   {
     cout << "dump ------------------------" << endl;
     static const char* StepTypes[] = {"declare", "sleep", "read", "write"};
-    vector< MetaStep > ::iterator it;
-    for(it = m_steps.begin(); it != m_steps.end(); it++)
+    vector< char*> ::iterator vit;
+    cout << "variables: [" ;
+    for(vit = m_variables.begin(); vit != m_variables.end(); vit++)
     {
-      if(it->type == WRITE)
-      {
-        cout << "write: "  <<  endl;
-        if(((StepWrite *)(it->the_step))->value->empty())
-          cout << "empty" << endl;
-        cout  << string_to_hex(*(((StepWrite*)(it->the_step))-> value->at(0))) << endl;
+      cout << *vit << " "; 
+    }
+    cout << "]" << endl << endl;
 
-      }
-      else
-        cout << StepTypes[it->type] << endl;
-
+    vector< MetaStep > ::iterator sit;
+    for(sit = m_steps.begin(); sit != m_steps.end(); sit++)
+    {
+      dump_step(*sit);
     }
 
   }
