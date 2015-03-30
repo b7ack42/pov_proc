@@ -99,6 +99,93 @@ typedef struct
   int end;
 }Slice;
 
+string string_to_hex(const string& in) 
+{
+    stringstream ss;
+
+    ss << hex ;//<< setw(2) << setfill('0');
+    for (size_t i = 0; in.length() > i; ++i) {
+        ss << "\\x" << setw(2) << setfill('0') << static_cast<unsigned int>(static_cast<unsigned char>(in[i]));
+    }
+
+    return ss.str(); 
+}
+
+string hex_to_string(const string& in) 
+{
+    string output;
+
+    assert((in.length() % 2) == 0);
+
+    size_t cnt = in.length() / 2;
+
+    for (size_t i = 0; cnt > i; ++i) {
+        uint32_t s = 0;
+        stringstream ss;
+        //cout << hex << in.substr(i * 2, 2) << " | " << endl;
+        ss << hex << in.substr(i * 2, 2);
+        ss >> s;
+
+        output.push_back(static_cast<unsigned char>(s));
+    }
+
+    return output;
+}
+
+void dump_match(Match* ma)
+{
+  cout << "{\'invert\': " << ma->invert << ", ";
+  cout << "\'values\': [";
+  int cnt = ma->types->size();
+  ValueType *pt = ma->types->data();
+  void** pv = ma->values->data();
+
+  const string types[2] = {"var", "data"};
+  int i, t;
+  for(i = 0; i < cnt; i++)
+  {
+    t = (int)pt[i];
+    if(t < 3)
+    {
+      cout << "(\'" << types[t] << "\', " << string_to_hex(*(string*)(pv[i])) << ")";
+    }
+    else
+    {
+      Regex* re = (Regex*) pv[i];
+      cout <<  "(\'pcre\', " << "{\'group\': " << re->group << ", " << "\'Pattern\': " << "\"" << re->pattern <<"\"}";
+    }
+
+    if(i < cnt - 1)
+    {
+      cout << ", ";
+    }
+    else
+    {
+      cout << "]";
+    }
+
+  }
+
+}
+
+
+void dump_assign(Assign* asn)
+{
+  cout << "{\'var\': " << asn->var << ", ";
+  if(asn->type == aPCRE)
+  {
+    Regex* re = (Regex*)(asn->expr);
+    cout << "\'expr(regex)\': " << "{\'group\': " << re->group << ", " << "\'Pattern\': " << "\"" << re->pattern <<"\"}";
+  }
+  else
+  {
+    assert(asn->type == SLICE);
+    Slice *s = (Slice*)(asn->expr);
+    cout << "\'expr(slice)\': " << "{\'bgein\': " << s->begin << ", " << "\'end\': " << s->end << "}";
+  }
+  cout << "}";
+}
+
 typedef struct
 { 
   int timeout;
@@ -109,11 +196,7 @@ typedef struct
   Assign* assign;
 }StepRead;
 
-void dump_read(StepRead* sr)
-{
-  //printf("(READ, {'timeout': %d, 'echo': %s, 'length': %d, 'delim': %s, 'match': ")
-  cout << "READ" << endl;
-}
+
 
 typedef struct
 {
@@ -122,20 +205,60 @@ typedef struct
   char* echo;
 }StepWrite;
 
+
+
+void dump_read(StepRead* sr)
+{
+  //printf("(READ, {'timeout': %d, 'echo': %s, 'length': %d, 'delim': %s, 'match': ")
+  cout << "(READ, ";
+  cout << "{\'timeout\': " << sr->timeout << ", ";
+  cout << "\'echo\': " << sr->echo << ", ";
+  if(sr->length != -1)
+  {
+    cout << "\'length\': " << sr->length;
+  }
+  else
+  {
+    assert(sr->delim);
+    cout << "\'delim\': " << string_to_hex(*(sr->delim));
+  }
+
+  if(sr->match)
+  {
+    cout << ", \'match\': ";// << " "; 
+    dump_match(sr->match);
+
+  }
+
+  if(sr->assign)
+  {
+    cout << ", \'assign': ";// << " "; 
+    dump_assign(sr->assign);
+  }
+
+  cout << "})" << endl;
+
+
+}
+
 void dump_write(StepWrite* sw)
 {
   cout << "(WRITE, ";
   cout << "{\'echo\': " <<  sw->echo << ", ";
-  cout << "\'values: ['";
+  cout << "\'values\': [";
   int i;
   int cnt  = sw->type->size();
-  // for(i = 0; i < cnt - 1; i++)
-  // {
-  //   cout << "(" << ((ValueStep)(sw->type[i] == VAR) ? "\'var\', " : "\'data\', ") << string_to_hex(sw->value[i]) << "), ";
-  // }
-  // cout << "(" << ((ValueStep)(sw->type[i] == VAR) ? "\'var\', " : "\'data\', ") << string_to_hex(sw->value[i]) << ")]} << endl";
-}
+  const string types[2] = {"var", "data"};
 
+  ValueType *pt = sw->type->data();
+  string** pv = sw->value->data();
+  for(i = 0; i < cnt - 1; i++)
+  {
+    cout << "(\'" << types[pt[i]] << "\', " << string_to_hex(*(pv[i])) << "), ";
+  }
+  cout << "(\'" << types[pt[i]] << "\', " << string_to_hex(*(pv[i])) << ")]})" << endl;
+  //int j = (int)(sw->type[0]);
+}
 
 class POV
 {
@@ -154,39 +277,7 @@ public:
   
   
 
-  string string_to_hex(const string& in) 
-  {
-      stringstream ss;
-
-      ss << hex ;//<< setw(2) << setfill('0');
-      for (size_t i = 0; in.length() > i; ++i) {
-          ss << "\\x" << setw(2) << setfill('0') << static_cast<unsigned int>(static_cast<unsigned char>(in[i]));
-      }
-
-      return ss.str(); 
-  }
-
-  string hex_to_string(const string& in) 
-  {
-      string output;
-
-      assert((in.length() % 2) == 0);
-
-      size_t cnt = in.length() / 2;
-
-      for (size_t i = 0; cnt > i; ++i) {
-          uint32_t s = 0;
-          stringstream ss;
-          //cout << hex << in.substr(i * 2, 2) << " | " << endl;
-          ss << hex << in.substr(i * 2, 2);
-          ss >> s;
-
-          output.push_back(static_cast<unsigned char>(s));
-      }
-
-      return output;
-  }
-
+  
   string* compile_hex_match(const char* text)
   {
     //{'\n', ' ', '\r', '\t'};
@@ -329,7 +420,7 @@ public:
 
   void* compile_string(const char* type, const char* data)
   {
-    printf("(type, data)@compile_string(): %s, %s\n", type, data);
+    //printf("(type, data)@compile_string(): %s, %s\n", type, data);
     if(strcmp(type, "pcre") == 0)
       return compile_pcre(data);
     else if(strcmp(type, "asciic") == 0)
@@ -491,7 +582,7 @@ public:
         default_format = "asciic";
 
     char* data_format = get_attribute(elm, "format", default_format, allowed_formats);
-    cout << "elm->text@parse_data: " << elm->GetText() << endl;
+    //cout << "elm->text@parse_data: " << elm->GetText() << endl;
     if(mark == 1)
     {
       delete(allowed_formats);
@@ -502,23 +593,18 @@ public:
 
   void parse_read(const XMLElement* elm)
   {
-    cout << endl << "read: " << elm->Name() << endl;
-    cout << -2 << endl;
+    //cout << endl << "read: " << elm->Name() << endl;
     StepRead* sr = new StepRead();
-    cout << -1 << endl;
     add_step(READ, sr);
-    cout << 0 << endl;
     vector<const char*>* allowed = new vector<const char*>();
     allowed->push_back("yes");
     allowed->push_back("no");
     allowed->push_back("ascii");
     sr->echo = get_attribute(elm, "echo", "no", allowed);
-    sr->timeout = 0;
     sr->match = NULL;
     sr->assign = NULL;
     sr->length = -1;
     sr->delim = NULL;
-    cout << 1 << endl;
 
     const XMLElement* child = elm->FirstChildElement();
     if(strcmp(child->Name(), "length") == 0)
@@ -540,7 +626,6 @@ public:
     if(!child)
       return;
 
-    cout << 2 << endl;
 
     if(strcmp(child->Name(), "match") == 0)
     {
@@ -591,13 +676,10 @@ public:
     }
     delete(allowed);
 
-    cout << 3 << endl;
-
     if(strcmp(child->Name(), "assign") == 0)
     {
       Assign* asn = parse_assign(child);
       sr->assign = asn;
-      cout << 4 << endl;
       child = child->NextSiblingElement();
       if(!child)
         return;
@@ -609,7 +691,6 @@ public:
     int _t = 0;
     child->QueryIntText(&_t);
     sr->timeout = _t;
-    cout << 6 << endl;
   }
  
 
@@ -617,7 +698,7 @@ public:
 
   void parse_write(const XMLElement* elm)
   {
-    cout << endl << "write: ---" << elm->Name() << endl;
+    //cout << endl << "write: ---" << elm->Name() << endl;
     //cout << -2;
     assert(elm);
     vector<string*>* values = new vector<string*>();
@@ -762,13 +843,14 @@ public:
   {
     cout << "dump ------------------------" << endl;
     static const char* StepTypes[] = {"declare", "sleep", "read", "write"};
-    vector< char*> ::iterator vit;
+    int vars_size = m_variables.size();
+    int i;
     cout << "variables: [" ;
-    for(vit = m_variables.begin(); vit != m_variables.end(); vit++)
+    for(i = 0; i < vars_size - 1; i++)
     {
-      cout << *vit << " "; 
+      cout << m_variables[i]<< ", "; 
     }
-    cout << "]" << endl << endl;
+    cout << m_variables[i] << "]" << endl << endl;
 
     vector< MetaStep > ::iterator sit;
     for(sit = m_steps.begin(); sit != m_steps.end(); sit++)
@@ -795,7 +877,7 @@ int main()
   POV pov = POV();
   // pov.compile_hex_match(str);
   // printf("str: %s\n", str.c_str());
-  pov.parse("/home/b7ack/hack/pov_proc/pov.xml");
+  pov.parse("/home/b7ack/hack/pov_proc/pov-1.xml");
   pov.dump();
   
   return 0;
